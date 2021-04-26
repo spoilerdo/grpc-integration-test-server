@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net5.0</TargetFramework>
+    <AssemblyName>GRPCIntegrationTestServer</AssemblyName>
+    <Description>Integration testserver configured for GRPC.</Description>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageTags>Testing, GRPC</PackageTags>
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
+    <Authors>Nick van der Burgt, Martijn Dormans</Authors>
+    <Product>GRPC Integration Test Server</Product>
+    <IsPackable>true</IsPackable>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Hosting.Abstractions" Version="2.2.0"/>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="5.0.5"/>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="5.0.5"/>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="5.0.5"/>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="5.0.0"/>
+    <PackageReference Include="Microsoft.Extensions.PlatformAbstractions" Version="1.1.0"/>
+  </ItemGroup>
+</Project>
