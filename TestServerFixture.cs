@@ -1,99 +1,73 @@
+#nullable enable
 using System;
-using System.IO;
 using System.Linq;
 using System.Net.Http;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.PlatformAbstractions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace GRPCIntegrationTestServer {
-    /// <summary>
-    /// Taken from https://github.com/P7CoreOrg/gRPC-dotnetcore-play/tree/master/src , minor edits made.
-    /// </summary>
-    /// <typeparam name="TStartup">The startup to use</typeparam>
-    /// <typeparam name="TDataContext">The data context to use</typeparam>
-    public abstract class TestServerFixture<TStartup, TDataContext> :
-           ITestServerFixture
-           where TStartup : class
+    public delegate void LogMessage(LogLevel logLevel, string categoryName, EventId eventId, string message, Exception exception);
+
+    public class TestServerFixture<TStartup, TDataContext> : IDisposable
+        where TStartup : class
         where TDataContext : DbContext {
-        private string _environmentUrl;
-        public bool IsUsingInProcTestServer { get; set; }
+        private readonly TestServer _server;
+        private readonly IHost _host;
 
-        public HttpMessageHandler MessageHandler { get; }
-        public TestServer TestServer { get; }
+        public TDataContext? Context;
 
-        protected abstract string RelativePathToHostProject { get; }
+        public event LogMessage? LoggedMessage;
 
-        public TestServerFixture() {
-            var contentRootPath = GetContentRootPath();
-            var builder = new WebHostBuilder();
+        public TestServerFixture() : this(null) { }
 
-            builder.UseContentRoot(contentRootPath)
-                .UseEnvironment("Development")
-                .ConfigureAppConfiguration(configureDelegate => {
+        public LoggerFactory LoggerFactory { get; }
+        public HttpMessageHandler Handler { get; }
+
+        public TestServerFixture(Action<IServiceCollection>? initialConfigureServices) {
+            LoggerFactory = new LoggerFactory();
+            LoggerFactory.AddProvider(new ForwardingLoggerProvider((logLevel, category, eventId, message, exception) => {
+                LoggedMessage?.Invoke(logLevel, category, eventId, message, exception);
+            }));
+
+            var builder = new HostBuilder()
+                .ConfigureWebHostDefaults(webHost => {
+                    webHost.UseTestServer()
+                        .UseStartup<TStartup>();
                 })
-                .ConfigureTestServices(services => {
-                    // All DI is done by the normal startup, loop through...
-                    // Find the dbcontext normally used and replace it with a proper dbcontext.
-                    var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DbContextOptions<TDataContext>));
-                    if (descriptor != null) {
-                        services.Remove(descriptor);
+                .ConfigureServices(services => {
+                    services.AddSingleton<ILoggerFactory>(LoggerFactory);
+
+                    var descriptors = services.Where(d => d.ServiceType == typeof(DbContextOptions<TDataContext>));
+                    if (descriptors.Count() > 0) {
+                        foreach (var descriptor in descriptors.ToArray()) {
+                            services.Remove(descriptor);
+                        }
                     }
 
                     services.AddDbContext<TDataContext>(options =>
                         options.UseInMemoryDatabase(new Guid().ToString()));
-                })
-                .ConfigureAppConfiguration(ConfigureAppConfiguration);
-            UseSettings(builder);
 
-            // Uses Start up class from your API Host project to configure the test server.
-            builder.UseStartup<TStartup>();
-            string environmentUrl = Environment.GetEnvironmentVariable("TestEnvironmentUrl");
-            IsUsingInProcTestServer = false;
-            if (string.IsNullOrWhiteSpace(environmentUrl)) {
-                environmentUrl = "http://localhost/";
+                    initialConfigureServices?.Invoke(services);
+                });
+            _host = builder.Start();
+            _server = _host.GetTestServer();
 
-                TestServer = new TestServer(builder);
-
-                MessageHandler = TestServer.CreateHandler();
-                IsUsingInProcTestServer = true;
-
-                // We need to suppress the execution context because there is no boundary between the client and server while using TestServer
-                MessageHandler = new SuppressExecutionContextHandler(MessageHandler);
-            } else {
-                if (environmentUrl.Last() != '/') {
-                    environmentUrl = $"{environmentUrl}/";
-                }
-                MessageHandler = new HttpClientHandler();
-            }
-
-            _environmentUrl = environmentUrl;
+            Handler = _server.CreateHandler();
         }
 
-        protected abstract void ConfigureAppConfiguration(
-            WebHostBuilderContext hostingContext,
-            IConfigurationBuilder config);
-
-        protected virtual void ConfigureServices(IServiceCollection services) {
+        public void Dispose() {
+            Handler.Dispose();
+            _host.Dispose();
+            _server.Dispose();
         }
 
-        protected virtual void UseSettings(WebHostBuilder builder) {
-        }
-
-        protected virtual void ConfigureAppConfiguration(IConfigurationBuilder configureDelegate) {
-        }
-
-        public HttpClient Client =>
-            new HttpClient(new SessionMessageHandler(MessageHandler)) {
-                BaseAddress = new Uri(_environmentUrl)
-            };
-
-        private string GetContentRootPath() {
-            var testProjectPath = PlatformServices.Default.Application.ApplicationBasePath;
-            return Path.Combine(testProjectPath, RelativePathToHostProject);
+        public IDisposable GetTestContext() {
+            return new TestServerContext<TStartup, TDataContext>(this);
         }
     }
 }
+#nullable disable
